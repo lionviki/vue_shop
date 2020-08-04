@@ -21,7 +21,7 @@
         <el-step title="完成"></el-step>
       </el-steps>
       <!-- tab栏区域 -->
-      <el-form :model="addForm" :rules="addFormRules" label-width="100px" label-position="top">
+      <el-form :model="addForm" ref="addFormRef" :rules="addFormRules" label-width="100px" label-position="top">
         <el-tabs v-model="activeIndex" :tab-position="'left'" :before-leave="beforeTableave" @tab-click="tabClicked">
           <el-tab-pane label="基本信息" name="0">
             <!-- 基本信息部分表单 -->
@@ -63,15 +63,41 @@
               <el-input v-model="item.attr_vals"></el-input>
             </el-form-item>
           </el-tab-pane>
-          <el-tab-pane label="商品图片" name="3">商品图片</el-tab-pane>
-          <el-tab-pane label="商品内容" name="4">商品内容</el-tab-pane>
+          <el-tab-pane label="商品图片" name="3">
+            <!-- 图片上传upload区域 -->
+            <!-- action 图片上传到后台的API地址 -->
+            <el-upload
+              action="http://127.0.0.1:8888/api/private/v1/upload"
+              :on-preview="handlePreview"
+              :on-remove="handleRemove"
+              list-type="picture"
+              :headers="headersObj"
+              :on-success="handleSuccess">
+              <el-button size="small" type="primary">点击上传</el-button>
+            </el-upload>
+          </el-tab-pane>
+          <el-tab-pane label="商品内容" name="4">
+            <!-- 富文本编辑器区域 -->
+            <quill-editor v-model="addForm.goods_introduce">
+            </quill-editor>
+            <!-- 添加商品确定按钮 -->
+            <el-button class="btnAdd" type="primary" @click="add">添加商品</el-button>
+          </el-tab-pane>
         </el-tabs>
       </el-form>
     </el-card>
+    <!-- 图片预览对话框 -->
+    <el-dialog
+      title="图片预览"
+      :visible.sync="previewDialogVisible"
+      width="50%">
+      <img :src="previewPath" alt="">
+    </el-dialog>
   </div>
 </template>
 
 <script>
+import _ from 'lodash'
 export default {
   data() {
     return {
@@ -84,7 +110,12 @@ export default {
         goods_weight: 0,
         goods_number: 0,
         // 商品分类所属的数组
-        goods_cat: []
+        goods_cat: [],
+        // 图片数组
+        pics: [],
+        // 商品的详细描述
+        goods_introduce: '',
+        attrs: []
       },
       // 添加商品的表单验证
       addFormRules: {
@@ -117,7 +148,15 @@ export default {
       // 分类参数数据
       manyTable: [],
       // 商品属性数据
-      onlyTable: []
+      onlyTable: [],
+      // 图片上传请求头
+      headersObj: {
+        Authorization: window.sessionStorage.getItem('token')
+      },
+      // 图片预览路径
+      previewPath: '',
+      // 控制图片预览对话框显示隐藏
+      previewDialogVisible: false
     }
   },
   created() {
@@ -175,6 +214,73 @@ export default {
         this.onlyTable = res.data
         console.log(this.onlyTable)
       }
+    },
+    // 处理上传图片预览效果
+    handlePreview (file) {
+      // file下的response是服务器响应数据 file.response.data.url是图片真实路径
+      // 存到data中 供对话框使用
+      this.previewPath = file.response.data.url
+      this.previewDialogVisible = true
+    },
+    // 处理移除图片操作
+    handleRemove (file) {
+      // 1. 获取将要删除图片的临时路径
+      const filePath = file.response.data.tmp_path
+      // 2. 从pics数组中找到这个图片的索引值
+      const i = this.addForm.pics.findIndex(x => x.pic === filePath)
+      // 3. 调用数组的splice方法 把图片信息对象从pics数组中删除
+      this.addForm.pics.splice(i, 1)
+      console.log(this.addForm)
+    },
+    // 监听图片上传成功后的操作
+    handleSuccess (response) {
+      // response服务器响应的数据
+      // 拼接得到一个图片信息对象
+      const picInfo = { pic: response.data.tmp_path }
+      // 将图片信息对象push到pics数组中
+      this.addForm.pics.push(picInfo)
+      console.log(this.addForm)
+    },
+    // 添加商品功能
+    add () {
+      this.$refs.addFormRef.validate(async valid => {
+        if (!valid) {
+          return this.$message.error('请填写必要的表单项!')
+        }
+        // 执行添加商品的业务逻辑
+        // 先深拷贝一下添加商品所需要提交的表单对象addForm
+        const form = _.cloneDeep(this.addForm)
+        form.goods_cat = form.goods_cat.join(',')
+        // 处理动态参数 遍历manyTable每一项，创建新对象接收需要的两个属性
+        // 在push到addForm添加表单中
+        this.manyTable.forEach(item => {
+          const newInfo = {
+            attr_id: item.attr_id,
+            attr_value: item.attr_vals.join(' ')
+          }
+          this.addForm.attrs.push(newInfo)
+        })
+        // 处理静态属性
+        this.onlyTable.forEach(item => {
+          const newInfo = {
+            attr_id: item.attr_id,
+            attr_value: item.attr_vals
+          }
+          this.addForm.attrs.push(newInfo)
+        })
+        // 把addForm的attrs属性复制到深拷贝的form中
+        form.attrs = this.addForm.attrs
+        console.log(form)
+
+        // 发起请求 添加商品
+        // 商品的名称必须是唯一的
+        const { data: res } = await this.$http.post('goods', form)
+        if (res.meta.status !== 201) {
+          return this.$message.error('添加商品失败!')
+        }
+        this.$message.success('添加商品成功')
+        this.$router.push('/goods')
+      })
     }
   },
   computed: {
@@ -193,5 +299,13 @@ export default {
 <style lang="less" scoped>
 .el-checkbox {
   margin: 0 10px 0 0 !important;
+}
+
+.el-dialog img {
+  width: 100%;
+}
+
+.btnAdd {
+  margin-top: 15px;
 }
 </style>
